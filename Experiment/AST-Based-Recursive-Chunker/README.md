@@ -166,6 +166,7 @@ mongo_uri=mongodb://localhost:27017
 
 ---
 
+
 ## Running the Chunker
 
 ```bash
@@ -176,14 +177,28 @@ source .venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Normal run
-python chunker.py [input_file_path] [output_file_path] --max-size 1500
+# Repo-level chunking (new)
+python chunker.py --max-size 1500
 ```
 
 Outputs:
-- Chunked code stored in DB (chunks table).
+- Chunked code stored in DB (chunks collection).
 - Related defs/types/asserts/calls grouped by symbol.
 - Oversized nodes recursively split while preserving semantics.
+- For repo-level runs: all files in a repo are processed together, with correct symbol scoping per repo.
+
+---
+
+## Repo-Level Chunking
+
+The chunker now supports processing an entire repository at once:
+
+- Reads a JSON index (e.g., `metta_index.json`) mapping file hashes to their repo-relative paths.
+- Groups files by repository, then iterates through each file in a repo.
+- Chunks each file and stores the results in MongoDB.
+- Ensures symbol scoping is correct by allowing symbol tables to be reset per repo.
+
+This enables scalable, automated chunking for large codebases and supports downstream retrieval and embedding workflows.
 
 ---
 

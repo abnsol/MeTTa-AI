@@ -140,10 +140,15 @@ This avoids oversized nodes breaking the chunker while preserving semantics.
 
 ---
 
+
 ## Example Chunking Run
 
 ```bash
+# Single-file run (legacy) // try on previous branches
 python chunker.py input.metta output.txt --max-size 500
+
+# Repo-level chunking (new)
+python chunker.py --max-size 500
 ```
 
 Output:
@@ -151,12 +156,25 @@ Output:
 - Chunked code stored in DB.
 - Related defs/types/asserts/calls grouped by symbol.
 - Oversized nodes recursively split.
+- For repo-level runs: all files in a repo are processed together, with correct symbol scoping per repo.
+
+---
+
+## Repo-Level Chunking
+
+The chunker now supports processing an entire repository at once:
+
+- Reads a JSON index (e.g., `metta_index.json`) mapping file hashes to their repo-relative paths.
+- Groups files by repository, then iterates through each file in a repo.
+- Chunks each file and stores the results in MongoDB.
+- Ensures symbol scoping is correct by allowing symbol tables to be reset per repo.
+
+This enables scalable, automated chunking for large codebases and supports downstream retrieval and embedding workflows.
 
 ---
 
 ## Next Steps
 
-- Repository-level parsing:
-  - Traverse repos at a high level (multi-file, module-aware).
-  - Persist real file_path values per node (currently using a demo file path).
-- Chunking Comments with functions by proximity. 
+- Further improvements to cross-file symbol aggregation and repo-level analytics.
+- Persist real file_path values per node (currently using a demo file path).
+- Chunking Comments with functions by proximity.
