@@ -1,6 +1,6 @@
 import re
 import metta_ast_parser 
-from db import Database 
+from db.db import Database 
 
 # take the src code return the potential chunks retrieved from the symbol index table
 async def preprocess_code(source_code: str, filepath: str, db: Database) -> str:
