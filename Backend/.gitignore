@@ -33,3 +33,7 @@ build/
 .env.*
 
 !.env.example
+
+temp/
+metta_index.json
+data/
