@@ -1,67 +1,64 @@
-import os,sys 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
-
+import os
+from collections import defaultdict 
 from typing import List, Dict, Any
 from dotenv import load_dotenv,find_dotenv
-from collections import defaultdict 
-from app.db.db import Database as DB
-from . import metta_ast_parser
-from .preprocess import preprocess_code
-from .utils import _build_chunk_doc
+from . import metta_ast_parser, preprocess, utils
+from ...db.db import Database as DB
 
 def getSize(node: metta_ast_parser.SyntaxNode) -> int:
     """Gets the size of a node based on its source text length."""
     start, end = node.src_range
     return end - start
 
-async def ChunkPreprocessedCode(potential_chunks: List[List[int]], max_size: int, db: DB, source_code: str, rel_path: str) -> List[Dict[str, Any]]:
+async def ChunkPreprocessedCode(potential_chunks: List[List[str]], max_size: int, db: DB) -> List[Dict[str, Any]]:
     """Chunks a list of potential chunks based on max_size.
     Each potential chunk is a list of text_node table IDs from our db.
     Returns a list of chunked code strings.
     """
+    # chunk, rel_path 
     chunks = []
 
-    for chunk_ids in potential_chunks:
-        chunk, chunk_size = [], 0
-        for chunk_id in chunk_ids:
-            text_range = await db.get_text_node(chunk_id)
-            text_range = text_range["text_range"]
-            text_node = source_code[text_range[0]:text_range[1]]
-            text_size = len(text_node)
+    for codes in potential_chunks:
+        chunk, rel_paths, chunk_size = [], set(), 0
+        for code, rel_path in codes:
+            text_node = code
+            text_size = len(code)
             
             # when single text node is larger than max_size
             if text_size > max_size:
                 if chunk:
-                    chunks.append("\n".join(chunk))
-                    chunk, chunk_size = [], 0
+                    chunks.append(["\n".join(chunk), rel_paths])
+                    chunk, rel_paths, chunk_size = [], set(), 0
                 # recursively split this big single node
                 nodes = metta_ast_parser.parse(text_node)[0]
                 subChunks = ChunkCodeRecursively(nodes, text_node, max_size)
-                chunks.extend(subChunks)
+                if subChunks:
+                    chunks.extend([[subChunk, {rel_path}] for subChunk in subChunks])
 
             # when adding this text node exceeds max_size
             elif chunk_size + text_size > max_size:
                 if chunk:
-                    chunks.append("\n".join(chunk))
-                chunk, chunk_size = [], 0
+                    chunks.append(["\n".join(chunk), rel_paths])
+                chunk, rel_paths, chunk_size = [], set(), 0
             else:
                 chunk.append(text_node)
+                rel_paths.add(rel_path)
                 chunk_size += text_size
 
         if chunk:
-            chunks.append("\n".join(chunk))
+            chunks.append(["\n".join(chunk), rel_paths])
 
-    chunks = [ _build_chunk_doc(chunk, rel_path) for chunk in chunks if chunk != ""]
+    chunks = [ utils._build_chunk_doc(chunk, list(rel_paths)) for chunk, rel_paths in chunks if chunk != ""]
     return chunks
 
-async def ChunkCode(code: str, max_size: int, db: DB, rel_path: str) -> List[Dict[str, Any]]:
+async def ChunkCode(repo_files: defaultdict, max_size: int, db: DB) -> List[Dict[str, Any]]:
     """
     Chunks the code into smaller pieces based on the max_size.
     Stores the chunks in the database.
     """
     
-    potential_chunks = await preprocess_code(code, rel_path, db)
-    chunks = await ChunkPreprocessedCode(potential_chunks, max_size, db, code, rel_path)
+    potential_chunks = await preprocess.preprocess_code(repo_files, db)
+    chunks = await ChunkPreprocessedCode(potential_chunks, max_size, db)
     ids = await db.insert_chunks(chunks)
     return chunks
 
@@ -79,10 +76,16 @@ def ChunkCodeRecursively(node: metta_ast_parser.SyntaxNode, text: str, max_size:
     chunks = []
     for sub_node in node.sub_nodes:
         sub_chunks = ChunkCodeRecursively(sub_node, text, max_size)
-        if chunks and len(chunks[-1]) + len(sub_chunks[0]) <= max_size:
-                chunks[-1] += "\n" + sub_chunks[0]
-                sub_chunks = sub_chunks[1:]
+        length_sub_chunks,cnt = len(sub_chunks), 0
+        if chunks:
+            for idx in range(length_sub_chunks):
+                if len(chunks[-1]) + len(sub_chunks[idx]) > max_size:
+                    break
 
+                chunks[-1] += "\n" + sub_chunks[idx]
+                cnt += 1
+
+            sub_chunks = sub_chunks[cnt:]
         chunks.extend(sub_chunks)
     return chunks
 
@@ -100,24 +103,16 @@ async def ast_based_chunker(index: Dict[str, str], max_size: int = 1500) -> None
         repo_name = rel_path.split('/')[0]
         repo_files[repo_name].append([rel_path, os.path.join(data_dir, f"{file_hash}.metta")])
 
-    for repo_name, files_path in repo_files.items():
-        print(f"Processing repo: {repo_name}")
-        for rel_path, file_path in files_path:
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    code = f.read()
-                await ChunkCode(code, max_size,db, rel_path)
-                print(f"Processed file: {rel_path}")
-            except FileNotFoundError:   
-                print(f"Error: Input file not found at '{rel_path}'")
-                continue
-            except Exception as e:
-                print(f"Error processing file '{rel_path}': {e}")
-                continue
-        # After all files in this repo are processed, reset symbols
-        await db.clear_text_nodes_symbols() 
+    # pass the repo_files to chunk_code
+    await ChunkCode(repo_files, max_size, db)
+    # After all files in this repo are processed, reset symbol index
+    await db.clear_symbols_index()
 
     print("Chunks Stored in database")
     print("Chunking complete!")
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(ast_based_chunker())
 
 
