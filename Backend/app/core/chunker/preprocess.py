@@ -1,10 +1,43 @@
+from collections import defaultdict
 import re
 from typing import Any, Dict, List
 from . import metta_ast_parser 
-from app.db.db import Database 
+from ...db.db import Database 
 
 # take the src code return the potential chunks retrieved from the symbol index table
-async def preprocess_code(source_code: str, filepath: str, db: Database) -> List[List[int]]:
+async def preprocess_code(repo_files: defaultdict, db: Database) -> List[List[str]]:
+    for repo_name, files_path in repo_files.items():
+        print(f"Processing repo: {repo_name}")
+        for rel_path, file_path in files_path:
+
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    code = f.read()
+                await parse_file(code,rel_path, db)
+                print(f"Processed file: {rel_path}")
+            except FileNotFoundError:   
+                print(f"Error: Input file not found at '{rel_path}'")
+                continue
+            except Exception as e:
+                print(f"Error processing file '{rel_path}': {e}")
+                continue
+    
+    # fetch all symbols
+    rows = await db.get_all_symbols()
+
+    potential_chunks: List[List[str]] = []
+
+    for row in rows:
+        single_chunk: List[str] = []
+        values = list(row.values())  # expected: [symbol, type, [ids...]]
+        for code in values[2:]:
+            single_chunk.extend(code) 
+        potential_chunks.append(single_chunk)
+
+    # return the potential chunks
+    return potential_chunks
+
+async def parse_file(source_code:str, rel_path:str, db:Database) -> None:
     tree = metta_ast_parser.parse(source_code)
 
     for idx,node in enumerate(tree):
@@ -20,28 +53,9 @@ async def preprocess_code(source_code: str, filepath: str, db: Database) -> List
         if head_symbol["symbol"] == None:
             continue
         
-        # insert text_node
-        st, end = node.src_range
-        node_id = await db.insert_text_node([st, end], filepath, node.node_type_str)
-
         # insert symbol
-        await db.upsert_symbol(head_symbol["symbol"], head_symbol["type"] + "s", node_id)
-
-    # fetch all symbols
-    rows = await db.get_all_symbols()
-
-    potential_chunks: List[List[int]] = []
-
-    for row in rows:
-        single_chunk: List[int] = []
-        values = list(row.values())  # expected: [symbol, type, [ids...]]
-        for ids in values[2:]:
-            single_chunk.extend(ids)
-        potential_chunks.append(single_chunk)
-
-    # return the potential chunks
-    return potential_chunks
-
+        st, end = node.src_range
+        await db.upsert_symbol(head_symbol["symbol"], head_symbol["type"] + "s", [source_code[st:end],rel_path])
 
 def extract_symbol_from_node(node: metta_ast_parser.SyntaxNode, source_text: str) -> Dict[str, Any]:
     st, end = node.src_range
