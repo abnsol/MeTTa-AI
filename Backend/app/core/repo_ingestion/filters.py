@@ -18,7 +18,7 @@ def process_metta_files(
     output_dir: str,
     repo_root: Optional[str] = None,
     json_path: str = "../metta_index.json"
-) -> None:
+) -> Dict[str, str]:
     """
     file_paths: list of all files in the repo
     output_dir: where to store hashed .metta files (flat)
@@ -52,3 +52,4 @@ def process_metta_files(
         json.dump(index, f, indent=2)
 
     logger.info(f"Index saved at {json_full_path}")
+    return index
