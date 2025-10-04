@@ -1,6 +1,5 @@
-from typing import List, Optional, Tuple, Literal
-from pydantic import BaseModel, Field, ConfigDict
-from bson import ObjectId
+from pydantic import BaseModel, Field
+from typing import Optional, Literal
 
 # Set up MongoDB schema/collections for creating chunks and metadata.
 class ChunkCreateSchema(BaseModel):
@@ -9,11 +8,11 @@ class ChunkCreateSchema(BaseModel):
     chunk: str = Field(..., min_length=1)
     project: str = Field(..., min_length=1)
     repo: str = Field(..., min_length=1)
-    file: str = Field(..., min_length=1)
+    file: list[str] = Field(..., min_length=1)
     isEmbedded: bool = False
 
     # Often omitted at create-time
-    section: Optional[str] = None
+    section: Optional[list[str]] = None
     version: Optional[str] = None
     description: Optional[str] = None    
 
@@ -24,23 +23,9 @@ class ChunkUpdateSchema(BaseModel):
     chunk: Optional[str]
     project: Optional[str]
     repo: Optional[str]
-    section: Optional[str]      
-    file: Optional[str]
+    section: Optional[list[str]]
+    file: Optional[list[str]]
     version: Optional[str]
     isEmbedded: Optional[bool]
     description: Optional[str]
 
-# SCHEMA for preprocessing
-class TextNodeSchema(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
-    text_range: Tuple[int, int]
-    file_path: str
-    node_type: str
-
-class SymbolSchema(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True) 
-    name: str
-    defs: List[ObjectId] = Field(default_factory=list)
-    calls: List[ObjectId] = Field(default_factory=list)
-    asserts: List[ObjectId] = Field(default_factory=list)
-    types: List[ObjectId] = Field(default_factory=list)

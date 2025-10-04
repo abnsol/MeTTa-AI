@@ -1,14 +1,11 @@
-import os, sys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
-
-from typing import List, Tuple, Union, Optional
+from typing import List, Union, Optional
 from bson import ObjectId
 from pymongo import AsyncMongoClient
 from pymongo.errors import BulkWriteError
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase as AsyncDatabase
-from app.db.schema import TextNodeSchema, SymbolSchema, ChunkCreateSchema, ChunkUpdateSchema
 from pydantic import ValidationError
+from . import schema
 
 class Database:
     def __init__(self, url: str, db_name: str = "metta_db") -> None:
@@ -16,65 +13,42 @@ class Database:
         self.db: AsyncDatabase = self.client.get_database(db_name)
 
         # get collections
-        self.text_nodes: AsyncCollection[TextNodeSchema] = self.db["text_nodes"]
-        self.symbols: AsyncCollection[SymbolSchema] = self.db["symbols"]
-        self.chunks_collection: AsyncCollection[ChunkCreateSchema] = self.db["chunks"]
+        self.symbols: AsyncCollection = self.db["symbols"]
+        self.chunks_collection: AsyncCollection[schema.ChunkCreateSchema] = self.db["chunks"]
 
-    async def clear_text_nodes_symbols(self) -> None:
+    async def clear_symbols_index(self) -> None:
         """
         clear these collections after a function scope is processed
         to avoid duplicate key errors on processing same function names 
         in different scopes
         """
-        await self.text_nodes.delete_many({})
         await self.symbols.delete_many({})
     
     async def clear_all_collections(self) -> None:
         """Clear all collections development only."""
-        await self.text_nodes.delete_many({})
         await self.symbols.delete_many({})
         await self.chunks_collection.delete_many({})
 
     async def close(self) -> None:
         await self.client.close()
-    
-    #----------------------------
-    # TEXT_NODES CRUD
-    #----------------------------
-    async def insert_text_node(self, text_range: Tuple[int, int], file_path: str, node_type: str) -> ObjectId:
-        """Insert a new text_node document."""
-        doc = {
-            "text_range": text_range,
-            "file_path": file_path,
-            "node_type": node_type
-        }
-        result = await self.text_nodes.insert_one(doc)
-        return result.inserted_id
-
-    async def get_text_node(self, node_id: ObjectId) -> Union[TextNodeSchema, str]:
-        """Fetch a text_node document by ID."""
-        result = await self.text_nodes.find_one({"_id": node_id})
-        if result:
-            return result
-        return "Text node not found"
 
     #----------------------------
     # SYMBOLS CRUD
     #----------------------------
-    async def upsert_symbol(self, name: str, col: str, node_id: ObjectId) -> Optional[ObjectId]:
+    async def upsert_symbol(self, name: str, col: str, code: str) -> Optional[ObjectId]:
         """Add a node_id to the given symbol's column (defs, calls, asserts, types)."""
-        update = {"$addToSet": {col: node_id}}
+        update = {"$addToSet": {col: code}}
         result = await self.symbols.update_one({"name": name}, update, upsert=True)
         return result.upserted_id if result.upserted_id else None
 
-    async def get_symbol(self, name: str) -> Union[SymbolSchema, str]:
+    async def get_symbol(self, name: str) -> Union[dict, str]:
         """Fetch a symbol document by name."""
         result = await self.symbols.find_one({"name": name})
         if result:
             return result
         return "Symbol not found"
 
-    async def get_all_symbols(self) -> List[SymbolSchema]:
+    async def get_all_symbols(self) -> List[dict]:
         """Return all documents from the symbols collection."""
         results = []
         async for doc in self.symbols.find({}):
@@ -92,7 +66,7 @@ class Database:
         Returns inserted ID.
         """
         try:
-            chunk = ChunkCreateSchema(**chunk_data)
+            chunk = schema.ChunkCreateSchema(**chunk_data)
         except ValidationError as e:
             print("Validation error while inserting chunk:", e)
             return None
@@ -114,12 +88,13 @@ class Database:
         # Validate and check duplicates
         for chunk_data in chunks_data:
             try:
-                chunk = ChunkCreateSchema(**chunk_data)
+                chunk = schema.ChunkCreateSchema(**chunk_data)
                 if not await self.chunks_collection.find_one({"chunkId": chunk.chunkId}):
                     valid_chunks.append(chunk.model_dump())
                 else:
                     print(f"Skipping duplicate chunkId: {chunk.chunkId}")
             except ValidationError as e:
+                print("Error Chunk",chunk_data)
                 print("Validation error:", e)
 
         if not valid_chunks:
@@ -173,7 +148,7 @@ class Database:
         Returns the number of documents modified (0 or 1).
         """
         try:
-            valid_chunk = ChunkUpdateSchema(**updates)
+            valid_chunk = schema.ChunkUpdateSchema(**updates)
             updates = valid_chunk.model_dump(exclude_unset=True)
         except ValidationError as e:
             print("Validation error while updating chunk:", e)
@@ -193,7 +168,7 @@ class Database:
         """
 
         try:
-            valid_chunk = ChunkUpdateSchema(**updates)
+            valid_chunk = schema.ChunkUpdateSchema(**updates)
             updates = valid_chunk.model_dump(exclude_unset=True)
         except ValidationError as e:
             print("Validation error while updating chunks:", e)
