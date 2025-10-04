@@ -73,7 +73,8 @@ class CharReader:
         return self.peeked[0]
 
     def next(self) -> Optional[Tuple[int, str]]:
-        self.idx += self.peeked[1]
+        # self.idx += self.peeked[1]
+        self.idx += 1
         nxt = self._next_internal()
         prev = self.peeked[0]
         self.peeked = nxt
@@ -82,7 +83,8 @@ class CharReader:
     def _next_internal(self) -> Tuple[Optional[Tuple[int, str]], int]:
         if self.idx < len(self.text):
             c = self.text[self.idx]
-            return (self.idx, c), len(c.encode("utf-8"))
+            # return (self.idx, c), len(c.encode("utf-8"))
+            return (self.idx, c), 1
         return None, 0
 
 
