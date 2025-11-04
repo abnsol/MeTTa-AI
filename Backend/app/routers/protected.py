@@ -1,18 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.requests import Request
 from app.db.users import UserRole
+from app.dependencies import get_current_user
 
 router = APIRouter(
     prefix="/api/protected",
     tags=["protected"],
     responses={403: {"description": "Forbidden"}},
 )
-
-def get_current_user(request: Request):
-    user = getattr(request.state, "user", None)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    return user
 
 def require_role(required_role: UserRole):
     def decorator(func):

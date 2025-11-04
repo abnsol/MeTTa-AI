@@ -1,11 +1,12 @@
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 from pymongo.database import Database
 from loguru import logger
 import os
 from app.db.db import _get_collection
 import time
+# from fastapi import HTTPException, status, Request
 
 
 def get_secret_key():
@@ -48,3 +49,12 @@ def create_refresh_token(data: dict) -> str:
     to_encode.update({"exp": int(time.time()) + expire, "type": "refresh"})
     encoded_jwt = jwt.encode(to_encode, get_secret_key(), algorithm=ALGORITHM)
     return encoded_jwt
+
+# def decode_token(token: str) -> Dict[str, Any]:
+#     """Decode a JWT, return payload."""
+#     try:
+#         payload = jwt.decode(token, get_secret_key(), algorithms=[ALGORITHM])
+#     except JWTError:
+#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+#     return payload
+

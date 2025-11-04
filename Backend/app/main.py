@@ -14,6 +14,7 @@ from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import VectorParams, Distance
 from app.db.users import seed_admin
 from app.routers import chunks, auth, protected,chunk_annotation
+from app.services.key_management_service import KMS
 
 from app.repositories.chunk_repository import ChunkRepository
 
@@ -78,6 +79,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # === Embedding Model Setup ===
     app.state.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
     logger.info("Embedding model loaded and ready")
+
+    # ===== Key management service setup =====
+    KEK = os.getenv("KEY_ENCRYPTION_KEY")
+    app.state.kms = KMS(KEK)
+    logger.info("Key Management Service initialized")
 
     yield  # -----> Application runs here
 

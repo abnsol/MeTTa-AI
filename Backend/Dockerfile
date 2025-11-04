@@ -1,4 +1,4 @@
-﻿FROM mcr.microsoft.com/playwright/python:v1.55.0-noble
+﻿FROM python:3.11-slim
 
 # Prevent Python from writing .pyc files and force stdout/stderr to be unbuffered
 ENV PYTHONDONTWRITEBYTECODE=1

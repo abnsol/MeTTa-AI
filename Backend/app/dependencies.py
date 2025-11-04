@@ -1,4 +1,5 @@
-from fastapi import Request, Depends
+from typing import Any, Dict 
+from fastapi import Request, Depends, HTTPException, status
 from pymongo import AsyncMongoClient
 from pymongo.database import Database
 from sentence_transformers import SentenceTransformer
@@ -7,6 +8,8 @@ from decouple import config
 from app.repositories.chunk_repository import ChunkRepository
 from app.services.llm_service import BaseLLMProvider, GeminiLLMProvider
 from app.services.chunk_annotation_service import ChunkAnnotationService
+from app.services.key_management_service import KMS
+# from app.services.auth import decode_token 
 
 
 def get_mongo_client(request: Request) -> AsyncMongoClient:
@@ -28,6 +31,9 @@ def get_qdrant_client_dep(request: Request) -> AsyncQdrantClient:
     """Retrieve Qdrant client from FastAPI application state."""
     return request.app.state.qdrant_client
 
+def get_kms(request: Request) -> KMS:
+    '''Key management service class dependency'''
+    return request.app.state.kms
 
 def get_chunk_repository(mongo_db: Database = Depends(get_mongo_db)) -> ChunkRepository:
     """Provide a ChunkRepository instance with MongoDB dependency injection."""
@@ -53,3 +59,19 @@ def get_annotation_service(
 ) -> ChunkAnnotationService:
     """Provide ChunkAnnotationService that orchestrates chunk retrieval and annotation."""
     return ChunkAnnotationService(repository=repository, llm_provider=llm_provider)
+
+# def get_current_user(request: Request, mongo_db) -> Dict[str, Any]:
+#     # try to extract and decode token from header
+#     auth = request.headers.get("Authorization", "")
+#     if not auth.startswith("Bearer "):
+#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+#     token = auth.split(None, 1)[1]
+#     payload = decode_token(token)
+#     userid = payload["_id"]
+#     return userid 
+
+def get_current_user(request: Request):
+    user = getattr(request.state, "user", None)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
