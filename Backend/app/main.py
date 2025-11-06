@@ -13,8 +13,8 @@ from app.rag.embedding.metadata_index import setup_metadata_indexes, create_coll
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import VectorParams, Distance
 from app.db.users import seed_admin
-from app.routers import chunks, auth, protected,chunk_annotation
-from app.services.key_management_service import KMS
+from app.core.utils.llm_utils import LLMClientFactory
+from app.routers import chunks, auth, protected,chunk_annotation, chatfrom app.services.key_management_service import KMS
 
 from app.repositories.chunk_repository import ChunkRepository
 
@@ -80,6 +80,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
     logger.info("Embedding model loaded and ready")
 
+    # === LLM Provider Setup ===
+    app.state.default_llm_provider = LLMClientFactory.create_default_client()
+    logger.info(
+        f"Default LLM provider: {app.state.default_llm_provider.get_model_name()}"
+    )
+
     # ===== Key management service setup =====
     KEK = os.getenv("KEY_ENCRYPTION_KEY")
     app.state.kms = KMS(KEK)
@@ -104,10 +110,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(lifespan=lifespan)
-# app.add_middleware(AuthMiddleware)
+app.add_middleware(AuthMiddleware)
 app.include_router(chunks.router)
 app.include_router(auth.router)
 app.include_router(protected.router)
+app.include_router(chat.router)
 app.include_router(chunk_annotation.router)
 
 

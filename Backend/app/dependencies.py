@@ -4,9 +4,8 @@ from pymongo import AsyncMongoClient
 from pymongo.database import Database
 from sentence_transformers import SentenceTransformer
 from qdrant_client import AsyncQdrantClient
-from decouple import config 
+from app.core.clients.llm_clients import LLMClient
 from app.repositories.chunk_repository import ChunkRepository
-from app.services.llm_service import BaseLLMProvider, GeminiLLMProvider
 from app.services.chunk_annotation_service import ChunkAnnotationService
 from app.services.key_management_service import KMS
 # from app.services.auth import decode_token 
@@ -28,8 +27,13 @@ def get_embedding_model_dep(request: Request) -> SentenceTransformer:
 
 
 def get_qdrant_client_dep(request: Request) -> AsyncQdrantClient:
-    """Retrieve Qdrant client from FastAPI application state."""
+    """Return Qdrant client stored in app.state"""
     return request.app.state.qdrant_client
+
+
+def get_llm_provider_dep(request: Request) -> LLMClient:
+    """Return default LLM provider stored in app.state"""
+    return request.app.state.default_llm_provider
 
 def get_kms(request: Request) -> KMS:
     '''Key management service class dependency'''
@@ -39,23 +43,10 @@ def get_chunk_repository(mongo_db: Database = Depends(get_mongo_db)) -> ChunkRep
     """Provide a ChunkRepository instance with MongoDB dependency injection."""
     return ChunkRepository(mongo_db)
 
-def get_llm_provider() -> BaseLLMProvider:
-    """
-    Provide the configured LLM Provider instance.
-    The GeminiLLMProvider's underlying client now handles key loading and rotation 
-    from the environment (looking for GEMINI_API_KEYS or GEMINI_API_KEY).
-    """
-    # Check for at least one key presence to ensure the service can run.
-    if not (config("GEMINI_API_KEYS", default="") or config("GEMINI_API_KEY", default="")):
-        raise ValueError(
-            "No Gemini API keys provided. Set GEMINI_API_KEY or GEMINI_API_KEYS environment variables."
-        )
-    return GeminiLLMProvider() 
-
 
 def get_annotation_service(
     repository: ChunkRepository = Depends(get_chunk_repository),
-    llm_provider: BaseLLMProvider = Depends(get_llm_provider),
+    llm_provider: LLMClient = Depends(get_llm_provider_dep),
 ) -> ChunkAnnotationService:
     """Provide ChunkAnnotationService that orchestrates chunk retrieval and annotation."""
     return ChunkAnnotationService(repository=repository, llm_provider=llm_provider)

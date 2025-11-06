@@ -4,8 +4,8 @@ from typing import List, Optional
 from loguru import logger
 
 from app.repositories.chunk_repository import ChunkRepository
-from app.services.llm_service import BaseLLMProvider, LLMQuotaExceededError
 from app.model.chunk import ChunkSchema, AnnotationStatus
+from app.core.clients.llm_clients import LLMClient, LLMQuotaExceededError
 
 
 # ------------------------------------------------------------------------------
@@ -23,9 +23,25 @@ RETRY_BACKOFF_BASE = 2  # exponential backoff base
 class ChunkAnnotationService:
     """Handles chunk retrieval, annotation generation, and database updates."""
 
-    def __init__(self, repository: ChunkRepository, llm_provider: BaseLLMProvider):
+    def __init__(self, repository: ChunkRepository, llm_provider: LLMClient):
         self.repository = repository
         self.llm_provider = llm_provider
+
+    async def _generate_description(self, code_chunk: str) -> str:
+        """Generate a concise description for a code chunk using LLM."""
+        if not code_chunk or not code_chunk.strip():
+            raise ValueError("Code chunk cannot be empty.")
+
+        max_len = 8000
+        if len(code_chunk) > max_len:
+            code_chunk = code_chunk[:max_len] + "\n# --- TRUNCATED ---"
+
+        prompt = (
+            "You are an expert in MeTTa programming language. "
+            "Generate a concise, human-readable summary description (under 20 words) "
+            f"for the following MeTTa code chunk: \n\n{code_chunk}"
+        )
+        return await self.llm_provider.generate_text(prompt)
 
     # --------------------------------------------------------------------------
     # VALIDATION
@@ -55,36 +71,50 @@ class ChunkAnnotationService:
             logger.error("Chunk {} failed validation; skipping.", chunk_id)
             return None
 
-        await self.repository.update_chunk_annotation(chunk_id, None, AnnotationStatus.PENDING)
+        await self.repository.update_chunk_annotation(
+            chunk_id, None, AnnotationStatus.PENDING
+        )
 
         try:
             desc = await asyncio.wait_for(
-                self.llm_provider.generate_description(chunk.chunk),
+                self._generate_description(chunk.chunk),
                 timeout=LLM_TIMEOUT,
             )
-            await self.repository.update_chunk_annotation(chunk_id, desc, AnnotationStatus.ANNOTATED)
+            await self.repository.update_chunk_annotation(
+                chunk_id, desc, AnnotationStatus.ANNOTATED
+            )
             logger.info("Annotated chunk {}", chunk_id)
             return await self.repository.get_chunk_for_annotation(chunk_id)
 
         except asyncio.TimeoutError:
-            await self.repository.update_chunk_annotation(chunk_id, None, AnnotationStatus.FAILED_GEN)
+            await self.repository.update_chunk_annotation(
+                chunk_id, None, AnnotationStatus.FAILED_GEN
+            )
             logger.error("LLM timeout while annotating chunk {}", chunk_id)
 
         except LLMQuotaExceededError as e:
-            await self.repository.update_chunk_annotation(chunk_id, None, AnnotationStatus.FAILED_QUOTA)
+            await self.repository.update_chunk_annotation(
+                chunk_id, None, AnnotationStatus.FAILED_QUOTA
+            )
             logger.critical("LLM quota exceeded for chunk {}: {}", chunk_id, e)
 
         except Exception as e:
-            await self.repository.update_chunk_annotation(chunk_id, None, AnnotationStatus.FAILED_GEN)
+            await self.repository.update_chunk_annotation(
+                chunk_id, None, AnnotationStatus.FAILED_GEN
+            )
             await self.repository.increment_retry_count(chunk_id)
-            logger.error("Error annotating chunk {}: {}: {}", chunk_id, type(e).__name__, e)
+            logger.error(
+                "Error annotating chunk {}: {}: {}", chunk_id, type(e).__name__, e
+            )
 
         return None
 
     # --------------------------------------------------------------------------
     # BATCH ANNOTATION
     # --------------------------------------------------------------------------
-    async def batch_annotate_unannotated_chunks(self, limit: Optional[int] = None) -> List[str]:
+    async def batch_annotate_unannotated_chunks(
+        self, limit: Optional[int] = None
+    ) -> List[str]:
         """
         Annotate a batch of unannotated chunks concurrently.
         Continues on per-chunk errors and collects statistics.
@@ -109,39 +139,57 @@ class ChunkAnnotationService:
                     )
                     return None
 
-                await self.repository.update_chunk_annotation(chunk_id, None, AnnotationStatus.PENDING)
+                await self.repository.update_chunk_annotation(
+                    chunk_id, None, AnnotationStatus.PENDING
+                )
 
                 for attempt in range(MAX_RETRIES):
                     try:
                         desc = await asyncio.wait_for(
-                            self.llm_provider.generate_description(chunk.chunk),
+                            self._generate_description(chunk.chunk),
                             timeout=LLM_TIMEOUT,
                         )
                         await self.repository.update_chunk_annotation(
                             chunk_id, desc, AnnotationStatus.ANNOTATED
                         )
-                        logger.info("Annotated chunk {} (attempt {})", chunk_id, attempt + 1)
+                        logger.info(
+                            "Annotated chunk {} (attempt {})", chunk_id, attempt + 1
+                        )
                         return chunk_id
 
                     except LLMQuotaExceededError:
                         await self.repository.update_chunk_annotation(
                             chunk_id, None, AnnotationStatus.FAILED_QUOTA
                         )
-                        logger.critical("Quota exceeded for chunk {} on attempt {}", chunk_id, attempt + 1)
+                        logger.critical(
+                            "Quota exceeded for chunk {} on attempt {}",
+                            chunk_id,
+                            attempt + 1,
+                        )
                         return "QUOTA_FAIL"
 
                     except asyncio.TimeoutError:
-                        logger.warning("Timeout for chunk {} (attempt {})", chunk_id, attempt + 1)
+                        logger.warning(
+                            "Timeout for chunk {} (attempt {})", chunk_id, attempt + 1
+                        )
 
                     except Exception as e:
-                        logger.error("Failed chunk {} (attempt {}): {}: {}", chunk_id, attempt + 1, type(e).__name__, e)
+                        logger.error(
+                            "Failed chunk {} (attempt {}): {}: {}",
+                            chunk_id,
+                            attempt + 1,
+                            type(e).__name__,
+                            e,
+                        )
 
                     # Exponential backoff before retry
                     if attempt < MAX_RETRIES - 1:
-                        await asyncio.sleep(RETRY_BACKOFF_BASE ** attempt)
+                        await asyncio.sleep(RETRY_BACKOFF_BASE**attempt)
 
                 await self.repository.increment_retry_count(chunk_id)
-                await self.repository.update_chunk_annotation(chunk_id, None, AnnotationStatus.FAILED_GEN)
+                await self.repository.update_chunk_annotation(
+                    chunk_id, None, AnnotationStatus.FAILED_GEN
+                )
                 return None
 
         # ----------------------------------------------------------------------
@@ -169,7 +217,11 @@ class ChunkAnnotationService:
         duration = time.perf_counter() - start_time
         logger.info(
             "Batch summary → Total: {}, Success: {}, Quota: {}, Failed: {}, Duration: {:.2f}s",
-            len(chunks), len(processed), quota_failed, failed, duration
+            len(chunks),
+            len(processed),
+            quota_failed,
+            failed,
+            duration,
         )
 
         return processed
@@ -177,11 +229,15 @@ class ChunkAnnotationService:
     # --------------------------------------------------------------------------
     # RETRY FAILED CHUNKS
     # --------------------------------------------------------------------------
-    async def retry_failed_chunks(self, limit: int = 100, include_quota: bool = False) -> List[str]:
+    async def retry_failed_chunks(
+        self, limit: int = 100, include_quota: bool = False
+    ) -> List[str]:
         """
         Retry previously failed chunks (with retry_count < MAX_RETRIES).
         """
-        failed_chunks = await self.repository.get_failed_chunks(limit=limit, include_quota=include_quota)
+        failed_chunks = await self.repository.get_failed_chunks(
+            limit=limit, include_quota=include_quota
+        )
         if not failed_chunks:
             logger.info("No failed chunks to retry.")
             return []
@@ -201,11 +257,20 @@ class ChunkAnnotationService:
                 if res:
                     processed.append(chunk_id)
             except LLMQuotaExceededError:
-                logger.critical("Quota still exceeded on retry for {}; aborting further retries.", chunk_id)
+                logger.critical(
+                    "Quota still exceeded on retry for {}; aborting further retries.",
+                    chunk_id,
+                )
                 break
             except Exception as e:
-                logger.error("Error retrying chunk {}: {}: {}", chunk_id, type(e).__name__, e)
+                logger.error(
+                    "Error retrying chunk {}: {}: {}", chunk_id, type(e).__name__, e
+                )
                 continue
 
-        logger.info("Retried {} failed chunks; {} succeeded.", len(failed_chunks), len(processed))
+        logger.info(
+            "Retried {} failed chunks; {} succeeded.",
+            len(failed_chunks),
+            len(processed),
+        )
         return processed

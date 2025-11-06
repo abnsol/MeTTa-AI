@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y git
 # Upgrade pip first, then install dependencies
 COPY requirements.txt .
 RUN pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r requirements.txt --resume-retries 3
 
 COPY . .
 
