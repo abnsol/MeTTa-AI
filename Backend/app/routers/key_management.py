@@ -12,7 +12,7 @@ import json
 
 router = APIRouter(
     prefix="/api/kms",
-    # tags=[""],
+    tags=["kms"],
     responses={404: {"description": "Not found"}},
 )
 

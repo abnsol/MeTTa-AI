@@ -1,10 +1,7 @@
 from cryptography.fernet import Fernet 
-from app.model.key import KeyModel
 from pymongo.database import Database
 from app.db.key import insert_dek, get_dek, get_api_services, delete_api_key
-import os, base64, hmac, hashlib, time
-from typing import Tuple
-from hmac import compare_digest 
+import os, base64
 
 class KMS:
     def __init__(self, KEK: str):
